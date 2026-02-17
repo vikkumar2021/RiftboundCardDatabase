@@ -6,21 +6,32 @@ import { cardApi } from '@/lib/api';
 import { useSearchStore } from '@/store/searchStore';
 import Link from 'next/link';
 
-function CardCard({ card }: { card: any }) {
-  const rarityColors: Record<string, string> = {
-    Common: 'text-gray-400',
-    Uncommon: 'text-green-400',
-    Rare: 'text-blue-400',
-    Epic: 'text-purple-400',
-  };
+const rarityColors: Record<string, string> = {
+  Common: 'text-gray-400',
+  Uncommon: 'text-green-400',
+  Rare: 'text-blue-400',
+  Epic: 'text-purple-400',
+  Showcase: 'text-yellow-400',
+};
 
+const domainColors: Record<string, string> = {
+  Body: 'text-orange-400',
+  Calm: 'text-teal-400',
+  Chaos: 'text-red-400',
+  Colorless: 'text-gray-400',
+  Fury: 'text-rose-500',
+  Mind: 'text-indigo-400',
+  Order: 'text-amber-400',
+};
+
+function CardCard({ card }: { card: any }) {
   return (
-    <Link href={`/cards/${card.scrydexId}`}>
+    <Link href={`/cards/${card.publicCode}`}>
       <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden hover:border-blue-500 hover:shadow-lg hover:shadow-blue-500/10 transition-all group">
         <div className="relative aspect-[2/3] bg-gray-800">
-          {card.imageSmall ? (
+          {card.imageUrl ? (
             <img
-              src={card.imageSmall}
+              src={card.imageUrl}
               alt={card.name}
               className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
               loading="lazy"
@@ -33,9 +44,9 @@ function CardCard({ card }: { card: any }) {
         </div>
         <div className="p-3">
           <h3 className="font-bold text-sm mb-1 truncate">{card.name}</h3>
-          <div className="flex items-center gap-2 text-xs text-gray-400">
-            <span>{card.domain}</span>
-            <span>·</span>
+          <div className="flex items-center gap-1 text-xs flex-wrap">
+            <span className={domainColors[card.domain] || 'text-gray-400'}>{card.domain}</span>
+            <span className="text-gray-600">·</span>
             <span className={rarityColors[card.rarity] || 'text-gray-400'}>{card.rarity}</span>
           </div>
           <div className="text-xs text-gray-500 mt-1">{card.type}</div>
@@ -82,7 +93,9 @@ export function CardGrid() {
     return (
       <div className="text-center py-12">
         <p className="text-red-400 text-lg">Failed to load cards</p>
-        <p className="text-gray-500 mt-2">Make sure the backend is running and the database is synced.</p>
+        <p className="text-gray-500 mt-2">
+          Make sure the backend is running and the database has been synced.
+        </p>
       </div>
     );
   }

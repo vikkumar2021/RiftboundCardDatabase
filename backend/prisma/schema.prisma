@@ -9,52 +9,42 @@ datasource db {
 
 model Card {
   id                 String   @id @default(uuid())
-  scrydexId          String   @unique // e.g. "OGN-296"
+  riotId             String   @unique // internal Riot ID
+  publicCode         String   @unique // e.g. "OGN-056"
   name               String
-  number             String
-  printedNumber      String
-  domain             String   // "Colorless", "Fire", "Water", etc.
-  type               String   // "Battlefield", "Champion", "Unit", etc.
-  artist             String
-  rarity             String   // "Common", "Uncommon", "Rare", "Epic"
-  rules              Json     // string[]
-  imageSmall         String
-  imageMedium        String
-  imageLarge         String
-  expansionId        String
-  language           String   @default("English")
-  languageCode       String   @default("EN")
-  expansionSortOrder Int
-  variants           Json     // CardVariant[] with prices
+  collectorNumber    String
+  domain             String   // "Body", "Calm", "Chaos", "Colorless", "Fury", "Mind", "Order"
+  type               String   // "Unit", "Spell", "Gear", "Legend", "Battlefield", "Rune"
+  superTypes         Json     // string[] — e.g. ["Champion"]
+  rarity             String   // "Common", "Uncommon", "Rare", "Epic", "Showcase"
+  energy             String?  // mana cost
+  might              String?  // attack
+  power              String?  // health/defense
+  tags               Json     // string[] — e.g. ["Mech", "Piltover"]
+  rulesHtml          String?  @db.Text // ability text as HTML
+  rulesText          String?  @db.Text // plain-text version for search
+  artist             String?
+  imageUrl           String   // full-res image from cmsassets.rgpub.io
+  orientation        String   @default("portrait")
+  setId              String
   lastUpdated        DateTime @default(now()) @updatedAt
 
-  expansion Expansion @relation(fields: [expansionId], references: [id])
+  set Expansion @relation(fields: [setId], references: [id])
 
   @@index([domain])
   @@index([rarity])
   @@index([type])
-  @@index([expansionId])
+  @@index([setId])
   @@index([name])
-  @@index([scrydexId])
+  @@index([publicCode])
   @@index([artist])
 }
 
 model Expansion {
-  id           String   @id // "OGN"
-  name         String   @unique
-  type         String   // "Main"
-  code         String
-  total        Int
-  printedTotal Int
-  releaseDate  String
-  logo         String
-  language     String   @default("English")
-  languageCode String   @default("EN")
+  id    String @id // "OGN", "SFD", "OGS"
+  name  String @unique
 
   cards Card[]
-
-  @@index([releaseDate])
-  @@index([code])
 }
 
 model PatchChange {

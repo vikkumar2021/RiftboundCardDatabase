@@ -5,13 +5,8 @@ const nextConfig = {
     remotePatterns: [
       {
         protocol: 'https',
-        hostname: 'images.scrydex.com',
-        pathname: '/riftbound/**',
-      },
-      {
-        protocol: 'https',
-        hostname: 'ddragon.leagueoflegends.com',
-        pathname: '/**',
+        hostname: 'cmsassets.rgpub.io',
+        pathname: '/sanity/images/**',
       },
     ],
     formats: ['image/avif', 'image/webp'],

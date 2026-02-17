@@ -1,129 +1,114 @@
-import axios, { AxiosInstance, AxiosError } from 'axios';
+import axios, { AxiosInstance } from 'axios';
 import { logger } from '../utils/logger';
-import {
-  ScrydexCardResponse,
-  ScrydexExpansionResponse,
-  ScrydexPaginatedResponse,
-} from '@riftbound-atlas/shared';
 
-export class ScrydexClient {
+/**
+ * Fetches card data from the official Riftbound card gallery.
+ * The site is Next.js and exposes a JSON data endpoint at:
+ *   /_next/data/{buildId}/en-us/card-gallery.json
+ *
+ * No authentication is required.
+ */
+
+export interface RiftboundRawCard {
+  id: string;
+  name: string;
+  publicCode: string;
+  collectorNumber: string;
+  orientation: string;
+  set: {
+    value: { id: string; label: string };
+  };
+  cardType: {
+    type: Array<{ id: string; label: string }>;
+    superType?: Array<{ id: string; label: string }>;
+  };
+  rarity: {
+    value: { id: string; label: string };
+  };
+  domain?: {
+    values: Array<{ id: string; label: string }>;
+  };
+  energy?: { value: { id: string; label: string } };
+  might?: { value: { id: string; label: string } };
+  power?: { value: { id: string; label: string } };
+  tags?: { tags: string[] };
+  text?: { richText: { body: string } };
+  illustrator?: { values: Array<{ id: string; label: string }> };
+  cardImage?: { url: string };
+}
+
+export class RiftboundGalleryClient {
   private client: AxiosInstance;
+  private buildId: string | null = null;
 
   constructor() {
-    const apiKey = process.env.SCRYDEX_API_KEY || '';
-    const teamId = process.env.SCRYDEX_TEAM_ID || '';
-
-    if (!apiKey || !teamId) {
-      logger.warn('SCRYDEX_API_KEY or SCRYDEX_TEAM_ID not set. API calls may fail.');
-    }
-
     this.client = axios.create({
-      baseURL: 'https://api.scrydex.com/riftbound/v1',
+      baseURL: 'https://riftbound.leagueoflegends.com',
       headers: {
-        'X-Api-Key': apiKey,
-        'X-Team-ID': teamId,
+        'User-Agent':
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko)',
         Accept: 'application/json',
       },
-      timeout: 15000,
+      timeout: 30000,
+    });
+  }
+
+  /**
+   * Detect the current Next.js build ID from the HTML page
+   */
+  async detectBuildId(): Promise<string> {
+    logger.info('Detecting Next.js build ID...');
+    const response = await this.client.get('/en-us/card-gallery/', {
+      headers: { Accept: 'text/html' },
     });
 
-    this.client.interceptors.response.use(
-      (response) => response,
-      async (error: AxiosError) => {
-        if (error.response?.status === 429) {
-          const retryAfter = error.response.headers['retry-after'];
-          const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 5000;
-          logger.warn(`Scrydex rate limited. Waiting ${waitTime}ms...`);
-          await new Promise((resolve) => setTimeout(resolve, waitTime));
-          return this.client.request(error.config!);
-        }
-        throw error;
-      }
-    );
-  }
+    const html = response.data as string;
+    const match = html.match(/\/_next\/static\/([^/]+)\/_buildManifest\.js/);
 
-  /**
-   * Fetch a single card by ID (e.g. "OGN-296")
-   */
-  async getCard(id: string): Promise<ScrydexCardResponse> {
-    const response = await this.client.get<ScrydexCardResponse>(`/cards/${id}`);
-    return response.data;
-  }
-
-  /**
-   * Fetch all cards with pagination. Returns up to 250 per page.
-   */
-  async getCards(
-    page: number = 1,
-    pageSize: number = 250,
-    query?: string
-  ): Promise<ScrydexPaginatedResponse<ScrydexCardResponse>> {
-    const params: Record<string, string | number> = { page, page_size: pageSize };
-    if (query) params.q = query;
-
-    const response =
-      await this.client.get<ScrydexPaginatedResponse<ScrydexCardResponse>>('/cards', { params });
-    return response.data;
-  }
-
-  /**
-   * Fetch cards for a specific expansion
-   */
-  async getExpansionCards(
-    expansionCode: string,
-    page: number = 1,
-    pageSize: number = 250
-  ): Promise<ScrydexPaginatedResponse<ScrydexCardResponse>> {
-    const response =
-      await this.client.get<ScrydexPaginatedResponse<ScrydexCardResponse>>(
-        `/expansions/${expansionCode}/cards`,
-        { params: { page, page_size: pageSize } }
-      );
-    return response.data;
-  }
-
-  /**
-   * Fetch all expansions
-   */
-  async getExpansions(): Promise<ScrydexPaginatedResponse<ScrydexExpansionResponse>> {
-    const response =
-      await this.client.get<ScrydexPaginatedResponse<ScrydexExpansionResponse>>('/expansions');
-    return response.data;
-  }
-
-  /**
-   * Fetch a single expansion by ID
-   */
-  async getExpansion(id: string): Promise<ScrydexExpansionResponse> {
-    const response = await this.client.get<ScrydexExpansionResponse>(`/expansions/${id}`);
-    return response.data;
-  }
-
-  /**
-   * Fetch ALL cards across all pages for a given expansion
-   */
-  async getAllExpansionCards(expansionCode: string): Promise<ScrydexCardResponse[]> {
-    const allCards: ScrydexCardResponse[] = [];
-    let page = 1;
-    const pageSize = 250;
-
-    while (true) {
-      logger.info(`Fetching ${expansionCode} cards page ${page}...`);
-      const result = await this.getExpansionCards(expansionCode, page, pageSize);
-      allCards.push(...result.data);
-
-      if (allCards.length >= result.totalCount || result.data.length < pageSize) {
-        break;
-      }
-      page++;
-
-      // Respect rate limits
-      await new Promise((resolve) => setTimeout(resolve, 200));
+    if (!match) {
+      throw new Error('Could not detect build ID from Riftbound card gallery page');
     }
 
-    logger.info(`Fetched ${allCards.length} total cards from ${expansionCode}`);
-    return allCards;
+    this.buildId = match[1];
+    logger.info(`Detected build ID: ${this.buildId}`);
+    return this.buildId;
+  }
+
+  /**
+   * Fetch all card data in a single request (~1.7 MB JSON, 664 cards)
+   */
+  async fetchAllCards(): Promise<RiftboundRawCard[]> {
+    if (!this.buildId) {
+      await this.detectBuildId();
+    }
+
+    logger.info('Fetching card gallery JSON...');
+    const url = `/_next/data/${this.buildId}/en-us/card-gallery.json`;
+    const response = await this.client.get(url);
+    const data = response.data;
+
+    // Cards live at pageProps.page.blades[2].cards.items
+    const blades = data?.pageProps?.page?.blades;
+    if (!blades || !Array.isArray(blades)) {
+      throw new Error('Unexpected page structure: missing blades array');
+    }
+
+    // Find the blade that contains the cards — typically index 2, but search to be safe
+    let cards: RiftboundRawCard[] = [];
+    for (const blade of blades) {
+      if (blade?.cards?.items && Array.isArray(blade.cards.items)) {
+        cards = blade.cards.items;
+        break;
+      }
+    }
+
+    if (cards.length === 0) {
+      throw new Error('No cards found in gallery data');
+    }
+
+    logger.info(`Fetched ${cards.length} cards from gallery`);
+    return cards;
   }
 }
 
-export const scrydexClient = new ScrydexClient();
+export const galleryClient = new RiftboundGalleryClient();

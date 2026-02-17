@@ -22,8 +22,8 @@ export const getCards = async (req: Request, res: Response): Promise<void> => {
       prisma.card.findMany({
         skip,
         take: pageSize,
-        orderBy: { expansionSortOrder: 'asc' },
-        include: { expansion: true },
+        orderBy: { name: 'asc' },
+        include: { set: true },
       }),
       prisma.card.count(),
     ]);
@@ -49,16 +49,16 @@ export const getCardById = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
-    // Try UUID first, then scrydexId
+    // Try by publicCode first (e.g. "OGN-056"), then UUID
     let card = await prisma.card.findUnique({
-      where: { id },
-      include: { expansion: true },
+      where: { publicCode: id },
+      include: { set: true },
     });
 
     if (!card) {
       card = await prisma.card.findUnique({
-        where: { scrydexId: id },
-        include: { expansion: true },
+        where: { id },
+        include: { set: true },
       });
     }
 
@@ -81,6 +81,7 @@ export const searchCards = async (req: Request, res: Response): Promise<void> =>
       rarities: req.query.rarities ? (req.query.rarities as string).split(',') : undefined,
       types: req.query.types ? (req.query.types as string).split(',') : undefined,
       expansions: req.query.expansions ? (req.query.expansions as string).split(',') : undefined,
+      tags: req.query.tags ? (req.query.tags as string).split(',') : undefined,
       textSearch: req.query.q as string | undefined,
     };
 
@@ -100,11 +101,12 @@ export const searchCards = async (req: Request, res: Response): Promise<void> =>
       where.type = { in: filters.types };
     }
     if (filters.expansions?.length) {
-      where.expansionId = { in: filters.expansions };
+      where.setId = { in: filters.expansions };
     }
     if (filters.textSearch) {
       where.OR = [
         { name: { contains: filters.textSearch, mode: 'insensitive' } },
+        { rulesText: { contains: filters.textSearch, mode: 'insensitive' } },
         { artist: { contains: filters.textSearch, mode: 'insensitive' } },
       ];
     }
@@ -114,8 +116,8 @@ export const searchCards = async (req: Request, res: Response): Promise<void> =>
         where,
         skip,
         take: pageSize,
-        orderBy: { expansionSortOrder: 'asc' },
-        include: { expansion: true },
+        orderBy: { name: 'asc' },
+        include: { set: true },
       }),
       prisma.card.count({ where }),
     ]);

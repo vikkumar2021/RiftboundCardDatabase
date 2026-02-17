@@ -1,145 +1,138 @@
 import { prisma } from '../utils/db';
 import { logger } from '../utils/logger';
-import { scrydexClient } from './scrydexClient';
-import { ScrydexCardResponse, ScrydexExpansionResponse } from '@riftbound-atlas/shared';
+import { galleryClient, RiftboundRawCard } from './scrydexClient';
+
+function stripHtml(html: string): string {
+  return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+}
 
 export class DataIngestionService {
   /**
-   * Normalize a Scrydex API card into our DB record shape
+   * Normalize a raw Riftbound gallery card into our DB shape
    */
-  private normalizeCard(card: ScrydexCardResponse) {
-    const frontImage = card.images.find((img) => img.type === 'front') || card.images[0];
+  private normalizeCard(raw: RiftboundRawCard) {
+    const domains = raw.domain?.values?.map((d) => d.label) || [];
+    const types = raw.cardType?.type?.map((t) => t.label) || [];
+    const superTypes = raw.cardType?.superType?.map((s) => s.label) || [];
+    const artists = raw.illustrator?.values?.map((a) => a.label) || [];
+    const tags = raw.tags?.tags || [];
+    const rulesHtml = raw.text?.richText?.body || null;
+    const rulesText = rulesHtml ? stripHtml(rulesHtml) : null;
+
+    const setId = raw.set?.value?.id || 'UNKNOWN';
+    const setName = raw.set?.value?.label || 'Unknown';
 
     return {
-      scrydexId: card.id,
-      name: card.name,
-      number: card.number,
-      printedNumber: card.printed_number,
-      domain: card.domain,
-      type: card.type,
-      artist: card.artist || 'Unknown',
-      rarity: card.rarity,
-      rules: card.rules || [],
-      imageSmall: frontImage?.small || '',
-      imageMedium: frontImage?.medium || '',
-      imageLarge: frontImage?.large || '',
-      expansionId: card.expansion.id,
-      language: card.language,
-      languageCode: card.language_code,
-      expansionSortOrder: card.expansion_sort_order,
-      variants: card.variants || [],
+      card: {
+        riotId: raw.id,
+        publicCode: raw.publicCode || `${setId}-${raw.collectorNumber}`,
+        name: raw.name,
+        collectorNumber: raw.collectorNumber || '',
+        domain: domains.join(', ') || 'Colorless',
+        type: types[0] || 'Unknown',
+        superTypes: superTypes,
+        rarity: raw.rarity?.value?.label || 'Common',
+        energy: raw.energy?.value?.id || null,
+        might: raw.might?.value?.id || null,
+        power: raw.power?.value?.id || null,
+        tags: tags,
+        rulesHtml: rulesHtml,
+        rulesText: rulesText,
+        artist: artists.join(', ') || null,
+        imageUrl: raw.cardImage?.url || '',
+        orientation: raw.orientation || 'portrait',
+        setId,
+      },
+      setId,
+      setName,
     };
   }
 
   /**
-   * Normalize a Scrydex expansion into our DB record shape
+   * Full sync: scrape the Riftbound card gallery and upsert everything
    */
-  private normalizeExpansion(exp: ScrydexExpansionResponse) {
-    return {
-      id: exp.id,
-      name: exp.name,
-      type: exp.type,
-      code: exp.code,
-      total: exp.total,
-      printedTotal: exp.printed_total,
-      releaseDate: exp.release_date,
-      logo: exp.logo || '',
-      language: exp.language,
-      languageCode: exp.language_code,
-    };
-  }
+  async syncAll(): Promise<{ created: number; updated: number; errors: number; total: number }> {
+    logger.info('Starting full card sync from Riftbound card gallery');
 
-  /**
-   * Full sync: fetch all expansions and all their cards from Scrydex
-   */
-  async syncAll(): Promise<void> {
-    logger.info('Starting full card sync from Scrydex API');
+    const rawCards = await galleryClient.fetchAllCards();
+    logger.info(`Fetched ${rawCards.length} raw cards`);
 
-    try {
-      // 1. Sync expansions
-      const expansionsRes = await scrydexClient.getExpansions();
-      const expansions = expansionsRes.data;
-      logger.info(`Found ${expansions.length} expansions`);
-
-      for (const exp of expansions) {
-        const expData = this.normalizeExpansion(exp);
-        await prisma.expansion.upsert({
-          where: { id: expData.id },
-          update: expData,
-          create: expData,
-        });
-        logger.info(`Synced expansion: ${expData.name} (${expData.id})`);
+    // Collect unique sets
+    const sets = new Map<string, string>();
+    for (const raw of rawCards) {
+      const setId = raw.set?.value?.id;
+      const setName = raw.set?.value?.label;
+      if (setId && setName && !sets.has(setId)) {
+        sets.set(setId, setName);
       }
-
-      // 2. Sync cards for each expansion
-      let totalCreated = 0;
-      let totalUpdated = 0;
-      let totalErrors = 0;
-
-      for (const exp of expansions) {
-        logger.info(`Fetching all cards for expansion: ${exp.name} (${exp.id})`);
-        const cards = await scrydexClient.getAllExpansionCards(exp.id);
-        logger.info(`Processing ${cards.length} cards from ${exp.name}`);
-
-        for (const card of cards) {
-          try {
-            const cardData = this.normalizeCard(card);
-
-            const existing = await prisma.card.findUnique({
-              where: { scrydexId: cardData.scrydexId },
-            });
-
-            if (existing) {
-              // Detect changes for patch tracking
-              const fieldsToTrack = ['name', 'domain', 'type', 'rarity', 'rules', 'artist'] as const;
-              for (const field of fieldsToTrack) {
-                const oldVal = JSON.stringify((existing as any)[field]);
-                const newVal = JSON.stringify(cardData[field]);
-                if (oldVal !== newVal) {
-                  await prisma.patchChange.create({
-                    data: {
-                      cardId: existing.id,
-                      fieldChanged: field,
-                      oldValue: oldVal,
-                      newValue: newVal,
-                    },
-                  });
-                }
-              }
-
-              await prisma.card.update({
-                where: { scrydexId: cardData.scrydexId },
-                data: cardData,
-              });
-              totalUpdated++;
-            } else {
-              await prisma.card.create({ data: cardData });
-              totalCreated++;
-            }
-          } catch (error) {
-            logger.error(`Error processing card ${card.id}`, { error });
-            totalErrors++;
-          }
-        }
-      }
-
-      logger.info('Full sync completed', {
-        created: totalCreated,
-        updated: totalUpdated,
-        errors: totalErrors,
-      });
-    } catch (error) {
-      logger.error('Full sync failed', { error });
-      throw error;
     }
-  }
 
-  /**
-   * Quick sync: only re-fetch cards, skip if counts match
-   */
-  async incrementalSync(): Promise<void> {
-    logger.info('Starting incremental sync');
-    await this.syncAll(); // For now, just do a full sync
+    // Upsert expansions
+    for (const [id, name] of sets) {
+      await prisma.expansion.upsert({
+        where: { id },
+        update: { name },
+        create: { id, name },
+      });
+      logger.info(`Synced expansion: ${name} (${id})`);
+    }
+
+    // Process cards
+    let created = 0;
+    let updated = 0;
+    let errors = 0;
+
+    for (const raw of rawCards) {
+      try {
+        const { card } = this.normalizeCard(raw);
+
+        if (!card.setId || card.setId === 'UNKNOWN') {
+          logger.warn(`Skipping card with no set: ${raw.name}`);
+          errors++;
+          continue;
+        }
+
+        const existing = await prisma.card.findUnique({
+          where: { riotId: card.riotId },
+        });
+
+        if (existing) {
+          // Track changes
+          const trackedFields = ['name', 'domain', 'type', 'rarity', 'rulesText', 'artist'] as const;
+          for (const field of trackedFields) {
+            const oldVal = (existing as any)[field];
+            const newVal = card[field];
+            if (oldVal !== newVal && oldVal !== undefined && newVal !== undefined) {
+              await prisma.patchChange.create({
+                data: {
+                  cardId: existing.id,
+                  fieldChanged: field,
+                  oldValue: String(oldVal ?? ''),
+                  newValue: String(newVal ?? ''),
+                },
+              });
+            }
+          }
+
+          await prisma.card.update({
+            where: { riotId: card.riotId },
+            data: card,
+          });
+          updated++;
+        } else {
+          await prisma.card.create({ data: card });
+          created++;
+        }
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        logger.error(`Error processing card ${raw.name}: ${msg}`);
+        errors++;
+      }
+    }
+
+    const result = { created, updated, errors, total: rawCards.length };
+    logger.info('Full sync completed', result);
+    return result;
   }
 }
 
