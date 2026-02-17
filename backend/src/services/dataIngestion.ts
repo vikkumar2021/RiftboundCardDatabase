@@ -1,235 +1,145 @@
 import { prisma } from '../utils/db';
 import { logger } from '../utils/logger';
-import { riotApiClient } from './riotApiClient';
-
-interface RiotCardData {
-  id: string;
-  name: string;
-  faction: string;
-  rarity: string;
-  cost: number;
-  type: string;
-  attack?: number;
-  health?: number;
-  text?: string;
-  flavorText?: string;
-  artist?: string;
-  set?: string;
-  imageUrl?: string;
-  imageHdUrl?: string;
-  keywords?: string[];
-}
+import { scrydexClient } from './scrydexClient';
+import { ScrydexCardResponse, ScrydexExpansionResponse } from '@riftbound-atlas/shared';
 
 export class DataIngestionService {
   /**
-   * Normalize Riot API response to our database schema
+   * Normalize a Scrydex API card into our DB record shape
    */
-  private normalizeCard(riotCard: RiotCardData, setId: string): any {
+  private normalizeCard(card: ScrydexCardResponse) {
+    const frontImage = card.images.find((img) => img.type === 'front') || card.images[0];
+
     return {
-      riotCardId: riotCard.id,
-      name: riotCard.name,
-      faction: riotCard.faction,
-      rarity: riotCard.rarity,
-      cost: riotCard.cost,
-      type: riotCard.type,
-      attack: riotCard.attack ?? null,
-      health: riotCard.health ?? null,
-      textRaw: riotCard.text ?? null,
-      textParsed: riotCard.text ? this.parseCardText(riotCard.text) : null,
-      flavorText: riotCard.flavorText ?? null,
-      artist: riotCard.artist ?? null,
-      setId,
-      releaseDate: new Date(),
-      imageSmallUrl: riotCard.imageUrl || '',
-      imageHdUrl: riotCard.imageHdUrl || riotCard.imageUrl || '',
+      scrydexId: card.id,
+      name: card.name,
+      number: card.number,
+      printedNumber: card.printed_number,
+      domain: card.domain,
+      type: card.type,
+      artist: card.artist || 'Unknown',
+      rarity: card.rarity,
+      rules: card.rules || [],
+      imageSmall: frontImage?.small || '',
+      imageMedium: frontImage?.medium || '',
+      imageLarge: frontImage?.large || '',
+      expansionId: card.expansion.id,
+      language: card.language,
+      languageCode: card.language_code,
+      expansionSortOrder: card.expansion_sort_order,
+      variants: card.variants || [],
     };
   }
 
   /**
-   * Parse card text to extract keywords and structured data
+   * Normalize a Scrydex expansion into our DB record shape
    */
-  private parseCardText(text: string): Record<string, unknown> {
-    // This is a placeholder - implement actual parsing logic based on Riftbound's text format
+  private normalizeExpansion(exp: ScrydexExpansionResponse) {
     return {
-      raw: text,
-      keywords: [],
+      id: exp.id,
+      name: exp.name,
+      type: exp.type,
+      code: exp.code,
+      total: exp.total,
+      printedTotal: exp.printed_total,
+      releaseDate: exp.release_date,
+      logo: exp.logo || '',
+      language: exp.language,
+      languageCode: exp.language_code,
     };
   }
 
   /**
-   * Sync cards from Riot API
+   * Full sync: fetch all expansions and all their cards from Scrydex
    */
-  async syncCards(): Promise<void> {
-    logger.info('Starting card sync from Riot API');
+  async syncAll(): Promise<void> {
+    logger.info('Starting full card sync from Scrydex API');
 
     try {
-      // This is a placeholder - adjust based on actual Riot API endpoints
-      // For now, we'll create a structure that can be filled in when API is available
-      const riotCards: RiotCardData[] = await this.fetchCardsFromRiot();
+      // 1. Sync expansions
+      const expansionsRes = await scrydexClient.getExpansions();
+      const expansions = expansionsRes.data;
+      logger.info(`Found ${expansions.length} expansions`);
 
-      if (riotCards.length === 0) {
-        logger.warn('No cards fetched from Riot API');
-        return;
+      for (const exp of expansions) {
+        const expData = this.normalizeExpansion(exp);
+        await prisma.expansion.upsert({
+          where: { id: expData.id },
+          update: expData,
+          create: expData,
+        });
+        logger.info(`Synced expansion: ${expData.name} (${expData.id})`);
       }
 
-      // Get or create sets
-      const setMap = new Map<string, string>();
-      for (const card of riotCards) {
-        if (card.set) {
-          if (!setMap.has(card.set)) {
-            const set = await prisma.set.upsert({
-              where: { name: card.set },
-              update: {},
-              create: {
-                name: card.set,
-                releaseDate: new Date(),
-                patchVersion: await riotApiClient.checkApiVersion(),
-              },
-            });
-            setMap.set(card.set, set.id);
-          }
-        }
-      }
+      // 2. Sync cards for each expansion
+      let totalCreated = 0;
+      let totalUpdated = 0;
+      let totalErrors = 0;
 
-      // Process cards
-      let created = 0;
-      let updated = 0;
-      let errors = 0;
+      for (const exp of expansions) {
+        logger.info(`Fetching all cards for expansion: ${exp.name} (${exp.id})`);
+        const cards = await scrydexClient.getAllExpansionCards(exp.id);
+        logger.info(`Processing ${cards.length} cards from ${exp.name}`);
 
-      for (const riotCard of riotCards) {
-        try {
-          const setId = riotCard.set ? setMap.get(riotCard.set) : null;
-          if (!setId) {
-            logger.warn(`No set ID found for card ${riotCard.id}`);
-            errors++;
-            continue;
-          }
+        for (const card of cards) {
+          try {
+            const cardData = this.normalizeCard(card);
 
-          const cardData = this.normalizeCard(riotCard, setId);
-
-          // Check if card exists
-          const existingCard = await prisma.card.findUnique({
-            where: { riotCardId: riotCard.id },
-          });
-
-          if (existingCard) {
-            // Detect changes for patch tracking
-            const changes: Array<{ field: string; oldValue: any; newValue: any }> = [];
-
-            Object.keys(cardData).forEach((key) => {
-              if (key === 'riotCardId' || key === 'setId') return;
-              const oldValue = (existingCard as any)[key];
-              const newValue = cardData[key];
-
-              if (oldValue !== newValue) {
-                changes.push({
-                  field: key,
-                  oldValue,
-                  newValue,
-                });
-              }
+            const existing = await prisma.card.findUnique({
+              where: { scrydexId: cardData.scrydexId },
             });
 
-            // Update card
-            await prisma.card.update({
-              where: { riotCardId: riotCard.id },
-              data: cardData,
-            });
-
-            // Record patch changes
-            if (changes.length > 0) {
-              const patchVersion = await riotApiClient.checkApiVersion();
-              await prisma.patchChange.createMany({
-                data: changes.map((change) => ({
-                  cardId: existingCard.id,
-                  patchVersion,
-                  fieldChanged: change.field,
-                  oldValue: String(change.oldValue),
-                  newValue: String(change.newValue),
-                })),
-              });
-            }
-
-            updated++;
-          } else {
-            // Create new card
-            const card = await prisma.card.create({
-              data: cardData,
-            });
-
-            // Create keyword associations
-            if (riotCard.keywords && riotCard.keywords.length > 0) {
-              for (const keywordName of riotCard.keywords) {
-                const keyword = await prisma.keyword.upsert({
-                  where: { name: keywordName },
-                  update: {},
-                  create: {
-                    name: keywordName,
-                    description: '', // Will be filled from API if available
-                  },
-                });
-
-                await prisma.cardKeyword.upsert({
-                  where: {
-                    cardId_keywordId: {
-                      cardId: card.id,
-                      keywordId: keyword.id,
+            if (existing) {
+              // Detect changes for patch tracking
+              const fieldsToTrack = ['name', 'domain', 'type', 'rarity', 'rules', 'artist'] as const;
+              for (const field of fieldsToTrack) {
+                const oldVal = JSON.stringify((existing as any)[field]);
+                const newVal = JSON.stringify(cardData[field]);
+                if (oldVal !== newVal) {
+                  await prisma.patchChange.create({
+                    data: {
+                      cardId: existing.id,
+                      fieldChanged: field,
+                      oldValue: oldVal,
+                      newValue: newVal,
                     },
-                  },
-                  update: {},
-                  create: {
-                    cardId: card.id,
-                    keywordId: keyword.id,
-                  },
-                });
+                  });
+                }
               }
-            }
 
-            created++;
+              await prisma.card.update({
+                where: { scrydexId: cardData.scrydexId },
+                data: cardData,
+              });
+              totalUpdated++;
+            } else {
+              await prisma.card.create({ data: cardData });
+              totalCreated++;
+            }
+          } catch (error) {
+            logger.error(`Error processing card ${card.id}`, { error });
+            totalErrors++;
           }
-        } catch (error) {
-          logger.error(`Error processing card ${riotCard.id}`, { error, cardId: riotCard.id });
-          errors++;
         }
       }
 
-      logger.info('Card sync completed', {
-        created,
-        updated,
-        errors,
-        total: riotCards.length,
+      logger.info('Full sync completed', {
+        created: totalCreated,
+        updated: totalUpdated,
+        errors: totalErrors,
       });
     } catch (error) {
-      logger.error('Card sync failed', { error });
+      logger.error('Full sync failed', { error });
       throw error;
     }
   }
 
   /**
-   * Fetch cards from Riot API
-   * Placeholder - implement based on actual API structure
-   */
-  private async fetchCardsFromRiot(): Promise<RiotCardData[]> {
-    try {
-      // This is a placeholder - adjust based on actual Riot API endpoints
-      // For Riftbound, we'll need to check the actual API documentation
-      logger.info('Fetching cards from Riot API...');
-      
-      // Placeholder return - replace with actual API call
-      return [];
-    } catch (error) {
-      logger.error('Failed to fetch cards from Riot API', { error });
-      throw error;
-    }
-  }
-
-  /**
-   * Incremental sync - only fetch changed cards
+   * Quick sync: only re-fetch cards, skip if counts match
    */
   async incrementalSync(): Promise<void> {
     logger.info('Starting incremental sync');
-    // Implement logic to detect and sync only changed cards
-    await this.syncCards();
+    await this.syncAll(); // For now, just do a full sync
   }
 }
 

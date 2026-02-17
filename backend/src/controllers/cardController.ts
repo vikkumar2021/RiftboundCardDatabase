@@ -22,28 +22,14 @@ export const getCards = async (req: Request, res: Response): Promise<void> => {
       prisma.card.findMany({
         skip,
         take: pageSize,
-        orderBy: { name: 'asc' },
-        include: {
-          set: true,
-          keywords: {
-            include: {
-              keyword: true,
-            },
-          },
-        },
+        orderBy: { expansionSortOrder: 'asc' },
+        include: { expansion: true },
       }),
       prisma.card.count(),
     ]);
 
-    const result = {
-      cards,
-      total,
-      page,
-      pageSize,
-    };
-
-    await redis.setex(cacheKey, 300, JSON.stringify(result)); // Cache for 5 minutes
-
+    const result = { cards, total, page, pageSize };
+    await redis.setex(cacheKey, 300, JSON.stringify(result));
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch cards' });
@@ -63,25 +49,25 @@ export const getCardById = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
-    const card = await prisma.card.findUnique({
+    // Try UUID first, then scrydexId
+    let card = await prisma.card.findUnique({
       where: { id },
-      include: {
-        set: true,
-        keywords: {
-          include: {
-            keyword: true,
-          },
-        },
-      },
+      include: { expansion: true },
     });
+
+    if (!card) {
+      card = await prisma.card.findUnique({
+        where: { scrydexId: id },
+        include: { expansion: true },
+      });
+    }
 
     if (!card) {
       res.status(404).json({ error: 'Card not found' });
       return;
     }
 
-    await redis.setex(cacheKey, 600, JSON.stringify(card)); // Cache for 10 minutes
-
+    await redis.setex(cacheKey, 600, JSON.stringify(card));
     res.json(card);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch card' });
@@ -91,13 +77,10 @@ export const getCardById = async (req: Request, res: Response): Promise<void> =>
 export const searchCards = async (req: Request, res: Response): Promise<void> => {
   try {
     const filters: CardSearchFilters = {
-      costMin: req.query.costMin ? parseInt(req.query.costMin as string) : undefined,
-      costMax: req.query.costMax ? parseInt(req.query.costMax as string) : undefined,
-      factions: req.query.factions ? (req.query.factions as string).split(',') : undefined,
+      domains: req.query.domains ? (req.query.domains as string).split(',') : undefined,
       rarities: req.query.rarities ? (req.query.rarities as string).split(',') : undefined,
       types: req.query.types ? (req.query.types as string).split(',') : undefined,
-      keywords: req.query.keywords ? (req.query.keywords as string).split(',') : undefined,
-      sets: req.query.sets ? (req.query.sets as string).split(',') : undefined,
+      expansions: req.query.expansions ? (req.query.expansions as string).split(',') : undefined,
       textSearch: req.query.q as string | undefined,
     };
 
@@ -105,44 +88,24 @@ export const searchCards = async (req: Request, res: Response): Promise<void> =>
     const pageSize = Math.min(parseInt(req.query.pageSize as string) || 20, 100);
     const skip = (page - 1) * pageSize;
 
-    // Build where clause
     const where: any = {};
 
-    if (filters.costMin !== undefined || filters.costMax !== undefined) {
-      where.cost = {};
-      if (filters.costMin !== undefined) where.cost.gte = filters.costMin;
-      if (filters.costMax !== undefined) where.cost.lte = filters.costMax;
+    if (filters.domains?.length) {
+      where.domain = { in: filters.domains };
     }
-
-    if (filters.factions && filters.factions.length > 0) {
-      where.faction = { in: filters.factions };
-    }
-
-    if (filters.rarities && filters.rarities.length > 0) {
+    if (filters.rarities?.length) {
       where.rarity = { in: filters.rarities };
     }
-
-    if (filters.types && filters.types.length > 0) {
+    if (filters.types?.length) {
       where.type = { in: filters.types };
     }
-
-    if (filters.sets && filters.sets.length > 0) {
-      where.setId = { in: filters.sets };
+    if (filters.expansions?.length) {
+      where.expansionId = { in: filters.expansions };
     }
-
-    if (filters.keywords && filters.keywords.length > 0) {
-      where.keywords = {
-        some: {
-          keywordId: { in: filters.keywords },
-        },
-      };
-    }
-
     if (filters.textSearch) {
       where.OR = [
         { name: { contains: filters.textSearch, mode: 'insensitive' } },
-        { textRaw: { contains: filters.textSearch, mode: 'insensitive' } },
-        { flavorText: { contains: filters.textSearch, mode: 'insensitive' } },
+        { artist: { contains: filters.textSearch, mode: 'insensitive' } },
       ];
     }
 
@@ -151,26 +114,13 @@ export const searchCards = async (req: Request, res: Response): Promise<void> =>
         where,
         skip,
         take: pageSize,
-        orderBy: { name: 'asc' },
-        include: {
-          set: true,
-          keywords: {
-            include: {
-              keyword: true,
-            },
-          },
-        },
+        orderBy: { expansionSortOrder: 'asc' },
+        include: { expansion: true },
       }),
       prisma.card.count({ where }),
     ]);
 
-    res.json({
-      cards,
-      total,
-      page,
-      pageSize,
-      filters,
-    });
+    res.json({ cards, total, page, pageSize, filters });
   } catch (error) {
     res.status(500).json({ error: 'Failed to search cards' });
   }

@@ -1,13 +1,11 @@
 import axios from 'axios';
-import { Card, CardSearchFilters, CardSearchResult } from '@riftbound-atlas/shared';
+import { CardSearchFilters, CardSearchResult } from '@riftbound-atlas/shared';
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 const apiClient = axios.create({
   baseURL: apiUrl,
-  headers: {
-    'Content-Type': 'application/json',
-  },
+  headers: { 'Content-Type': 'application/json' },
 });
 
 export const cardApi = {
@@ -19,20 +17,16 @@ export const cardApi = {
   },
 
   getCardById: async (id: string) => {
-    const response = await apiClient.get<Card>(`/api/cards/${id}`);
+    const response = await apiClient.get(`/api/cards/${id}`);
     return response.data;
   },
 
   searchCards: async (filters: CardSearchFilters, page: number = 1, pageSize: number = 20) => {
     const params: Record<string, string> = { page: String(page), pageSize: String(pageSize) };
-
-    if (filters.costMin !== undefined) params.costMin = String(filters.costMin);
-    if (filters.costMax !== undefined) params.costMax = String(filters.costMax);
-    if (filters.factions?.length) params.factions = filters.factions.join(',');
+    if (filters.domains?.length) params.domains = filters.domains.join(',');
     if (filters.rarities?.length) params.rarities = filters.rarities.join(',');
     if (filters.types?.length) params.types = filters.types.join(',');
-    if (filters.keywords?.length) params.keywords = filters.keywords.join(',');
-    if (filters.sets?.length) params.sets = filters.sets.join(',');
+    if (filters.expansions?.length) params.expansions = filters.expansions.join(',');
     if (filters.textSearch) params.q = filters.textSearch;
 
     const response = await apiClient.get<CardSearchResult>('/api/cards/search', { params });
@@ -41,28 +35,24 @@ export const cardApi = {
 };
 
 export const filterApi = {
-  getFactions: async () => {
-    const response = await apiClient.get<string[]>('/api/filters/factions');
+  getDomains: async (): Promise<string[]> => {
+    const response = await apiClient.get<string[]>('/api/filters/domains');
     return response.data;
   },
-
-  getRarities: async () => {
+  getRarities: async (): Promise<string[]> => {
     const response = await apiClient.get<string[]>('/api/filters/rarities');
     return response.data;
   },
-
-  getTypes: async () => {
+  getTypes: async (): Promise<string[]> => {
     const response = await apiClient.get<string[]>('/api/filters/types');
     return response.data;
   },
-
-  getKeywords: async () => {
-    const response = await apiClient.get('/api/filters/keywords');
+  getArtists: async (): Promise<string[]> => {
+    const response = await apiClient.get<string[]>('/api/filters/artists');
     return response.data;
   },
-
-  getSets: async () => {
-    const response = await apiClient.get('/api/filters/sets');
+  getExpansions: async () => {
+    const response = await apiClient.get('/api/filters/expansions');
     return response.data;
   },
 };

@@ -1,36 +1,44 @@
 'use client';
 
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { cardApi } from '@/lib/api';
 import { useSearchStore } from '@/store/searchStore';
-import { Card } from '@riftbound-atlas/shared';
 import Link from 'next/link';
-import Image from 'next/image';
 
-function CardCard({ card }: { card: Card }) {
+function CardCard({ card }: { card: any }) {
+  const rarityColors: Record<string, string> = {
+    Common: 'text-gray-400',
+    Uncommon: 'text-green-400',
+    Rare: 'text-blue-400',
+    Epic: 'text-purple-400',
+  };
+
   return (
-    <Link href={`/cards/${card.id}`}>
-      <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden hover:border-blue-500 transition-colors">
+    <Link href={`/cards/${card.scrydexId}`}>
+      <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden hover:border-blue-500 hover:shadow-lg hover:shadow-blue-500/10 transition-all group">
         <div className="relative aspect-[2/3] bg-gray-800">
-          {card.imageSmallUrl && (
-            <Image
-              src={card.imageSmallUrl}
+          {card.imageSmall ? (
+            <img
+              src={card.imageSmall}
               alt={card.name}
-              fill
-              className="object-cover"
+              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
               loading="lazy"
             />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-gray-600">
+              No Image
+            </div>
           )}
         </div>
-        <div className="p-4">
-          <h3 className="font-bold text-lg mb-1">{card.name}</h3>
-          <div className="flex items-center gap-2 text-sm text-gray-400">
-            <span>{card.cost} cost</span>
-            <span>•</span>
-            <span>{card.faction}</span>
-            <span>•</span>
-            <span>{card.rarity}</span>
+        <div className="p-3">
+          <h3 className="font-bold text-sm mb-1 truncate">{card.name}</h3>
+          <div className="flex items-center gap-2 text-xs text-gray-400">
+            <span>{card.domain}</span>
+            <span>·</span>
+            <span className={rarityColors[card.rarity] || 'text-gray-400'}>{card.rarity}</span>
           </div>
+          <div className="text-xs text-gray-500 mt-1">{card.type}</div>
         </div>
       </div>
     </Link>
@@ -45,7 +53,9 @@ export function CardGrid() {
   const { data, isLoading, error } = useQuery({
     queryKey: ['cards', filters, page],
     queryFn: () => {
-      const hasFilters = Object.keys(filters).length > 0;
+      const hasFilters = Object.values(filters).some(
+        (v) => v !== undefined && (Array.isArray(v) ? v.length > 0 : true)
+      );
       return hasFilters
         ? cardApi.searchCards(filters, page, pageSize)
         : cardApi.getCards(page, pageSize);
@@ -58,7 +68,7 @@ export function CardGrid() {
         {Array.from({ length: 20 }).map((_, i) => (
           <div key={i} className="bg-gray-900 border border-gray-800 rounded-lg animate-pulse">
             <div className="aspect-[2/3] bg-gray-800" />
-            <div className="p-4 space-y-2">
+            <div className="p-3 space-y-2">
               <div className="h-4 bg-gray-800 rounded w-3/4" />
               <div className="h-3 bg-gray-800 rounded w-1/2" />
             </div>
@@ -69,39 +79,51 @@ export function CardGrid() {
   }
 
   if (error) {
-    return <div className="text-red-500">Error loading cards</div>;
+    return (
+      <div className="text-center py-12">
+        <p className="text-red-400 text-lg">Failed to load cards</p>
+        <p className="text-gray-500 mt-2">Make sure the backend is running and the database is synced.</p>
+      </div>
+    );
   }
 
   if (!data || data.cards.length === 0) {
-    return <div className="text-gray-400">No cards found</div>;
+    return (
+      <div className="text-center py-12">
+        <p className="text-gray-400 text-lg">No cards found</p>
+        <p className="text-gray-500 mt-2">Try adjusting your filters or search terms.</p>
+      </div>
+    );
   }
 
   const totalPages = Math.ceil(data.total / pageSize);
 
   return (
     <div>
+      <p className="text-sm text-gray-500 mb-4">{data.total} cards found</p>
+
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 mb-8">
-        {data.cards.map((card) => (
+        {data.cards.map((card: any) => (
           <CardCard key={card.id} card={card} />
         ))}
       </div>
 
       {totalPages > 1 && (
-        <div className="flex justify-center gap-2">
+        <div className="flex justify-center items-center gap-4">
           <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             disabled={page === 1}
-            className="px-4 py-2 bg-gray-800 rounded disabled:opacity-50"
+            className="px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             Previous
           </button>
-          <span className="px-4 py-2">
+          <span className="text-gray-400">
             Page {page} of {totalPages}
           </span>
           <button
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             disabled={page === totalPages}
-            className="px-4 py-2 bg-gray-800 rounded disabled:opacity-50"
+            className="px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             Next
           </button>
@@ -110,5 +132,3 @@ export function CardGrid() {
     </div>
   );
 }
-
-import { useState } from 'react';

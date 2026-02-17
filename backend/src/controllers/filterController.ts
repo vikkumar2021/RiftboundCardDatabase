@@ -17,18 +17,18 @@ const getCachedOrFetch = async <T>(
   return data;
 };
 
-export const getFactions = async (req: Request, res: Response): Promise<void> => {
+export const getDomains = async (req: Request, res: Response): Promise<void> => {
   try {
-    const factions = await getCachedOrFetch('filters:factions', async () => {
+    const domains = await getCachedOrFetch('filters:domains', async () => {
       const cards = await prisma.card.findMany({
-        select: { faction: true },
-        distinct: ['faction'],
+        select: { domain: true },
+        distinct: ['domain'],
       });
-      return cards.map((c) => c.faction).sort();
+      return cards.map((c) => c.domain).sort();
     });
-    res.json(factions);
+    res.json(domains);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch factions' });
+    res.status(500).json({ error: 'Failed to fetch domains' });
   }
 };
 
@@ -62,28 +62,30 @@ export const getTypes = async (req: Request, res: Response): Promise<void> => {
   }
 };
 
-export const getKeywords = async (req: Request, res: Response): Promise<void> => {
+export const getArtists = async (req: Request, res: Response): Promise<void> => {
   try {
-    const keywords = await getCachedOrFetch('filters:keywords', async () => {
-      return prisma.keyword.findMany({
-        orderBy: { name: 'asc' },
+    const artists = await getCachedOrFetch('filters:artists', async () => {
+      const cards = await prisma.card.findMany({
+        select: { artist: true },
+        distinct: ['artist'],
       });
+      return cards.map((c) => c.artist).sort();
     });
-    res.json(keywords);
+    res.json(artists);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch keywords' });
+    res.status(500).json({ error: 'Failed to fetch artists' });
   }
 };
 
-export const getSets = async (req: Request, res: Response): Promise<void> => {
+export const getExpansions = async (req: Request, res: Response): Promise<void> => {
   try {
-    const sets = await getCachedOrFetch('filters:sets', async () => {
-      return prisma.set.findMany({
+    const expansions = await getCachedOrFetch('filters:expansions', async () => {
+      return prisma.expansion.findMany({
         orderBy: { releaseDate: 'desc' },
       });
     });
-    res.json(sets);
+    res.json(expansions);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch sets' });
+    res.status(500).json({ error: 'Failed to fetch expansions' });
   }
 };

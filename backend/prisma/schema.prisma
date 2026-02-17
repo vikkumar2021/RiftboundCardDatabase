@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -11,81 +8,63 @@ datasource db {
 }
 
 model Card {
-  id            String   @id @default(uuid())
-  riotCardId   String   @unique
-  name          String
-  faction       String
-  rarity        String
-  cost          Int
-  type          String
-  attack        Int?
-  health        Int?
-  textRaw       String?  @db.Text
-  textParsed    Json?
-  flavorText    String?  @db.Text
-  artist        String?
-  setId         String
-  releaseDate   DateTime
-  lastUpdated   DateTime @default(now()) @updatedAt
-  imageSmallUrl String
-  imageHdUrl    String
+  id                 String   @id @default(uuid())
+  scrydexId          String   @unique // e.g. "OGN-296"
+  name               String
+  number             String
+  printedNumber      String
+  domain             String   // "Colorless", "Fire", "Water", etc.
+  type               String   // "Battlefield", "Champion", "Unit", etc.
+  artist             String
+  rarity             String   // "Common", "Uncommon", "Rare", "Epic"
+  rules              Json     // string[]
+  imageSmall         String
+  imageMedium        String
+  imageLarge         String
+  expansionId        String
+  language           String   @default("English")
+  languageCode       String   @default("EN")
+  expansionSortOrder Int
+  variants           Json     // CardVariant[] with prices
+  lastUpdated        DateTime @default(now()) @updatedAt
 
-  set      Set           @relation(fields: [setId], references: [id])
-  keywords CardKeyword[]
+  expansion Expansion @relation(fields: [expansionId], references: [id])
 
-  @@index([faction])
+  @@index([domain])
   @@index([rarity])
   @@index([type])
-  @@index([cost])
-  @@index([setId])
+  @@index([expansionId])
   @@index([name])
-  @@index([riotCardId])
+  @@index([scrydexId])
+  @@index([artist])
 }
 
-model Set {
-  id          String   @id @default(uuid())
-  name        String   @unique
-  releaseDate DateTime
-  patchVersion String
+model Expansion {
+  id           String   @id // "OGN"
+  name         String   @unique
+  type         String   // "Main"
+  code         String
+  total        Int
+  printedTotal Int
+  releaseDate  String
+  logo         String
+  language     String   @default("English")
+  languageCode String   @default("EN")
 
   cards Card[]
 
   @@index([releaseDate])
-  @@index([patchVersion])
-}
-
-model Keyword {
-  id          String   @id @default(uuid())
-  name        String   @unique
-  description String   @db.Text
-
-  cards CardKeyword[]
-
-  @@index([name])
-}
-
-model CardKeyword {
-  cardId    String
-  keywordId String
-
-  card    Card    @relation(fields: [cardId], references: [id], onDelete: Cascade)
-  keyword Keyword @relation(fields: [keywordId], references: [id], onDelete: Cascade)
-
-  @@id([cardId, keywordId])
-  @@index([cardId])
-  @@index([keywordId])
+  @@index([code])
 }
 
 model PatchChange {
-  id          String   @id @default(uuid())
-  cardId      String
-  patchVersion String
+  id           String   @id @default(uuid())
+  cardId       String
   fieldChanged String
-  oldValue    String?  @db.Text
-  newValue    String?  @db.Text
-  changeDate  DateTime @default(now())
+  oldValue     String?  @db.Text
+  newValue     String?  @db.Text
+  changeDate   DateTime @default(now())
 
   @@index([cardId])
-  @@index([patchVersion])
   @@index([changeDate])
 }
