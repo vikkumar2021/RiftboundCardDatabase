@@ -1,0 +1,91 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Card {
+  id            String   @id @default(uuid())
+  riotCardId   String   @unique
+  name          String
+  faction       String
+  rarity        String
+  cost          Int
+  type          String
+  attack        Int?
+  health        Int?
+  textRaw       String?  @db.Text
+  textParsed    Json?
+  flavorText    String?  @db.Text
+  artist        String?
+  setId         String
+  releaseDate   DateTime
+  lastUpdated   DateTime @default(now()) @updatedAt
+  imageSmallUrl String
+  imageHdUrl    String
+
+  set      Set           @relation(fields: [setId], references: [id])
+  keywords CardKeyword[]
+
+  @@index([faction])
+  @@index([rarity])
+  @@index([type])
+  @@index([cost])
+  @@index([setId])
+  @@index([name])
+  @@index([riotCardId])
+}
+
+model Set {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  releaseDate DateTime
+  patchVersion String
+
+  cards Card[]
+
+  @@index([releaseDate])
+  @@index([patchVersion])
+}
+
+model Keyword {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String   @db.Text
+
+  cards CardKeyword[]
+
+  @@index([name])
+}
+
+model CardKeyword {
+  cardId    String
+  keywordId String
+
+  card    Card    @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  keyword Keyword @relation(fields: [keywordId], references: [id], onDelete: Cascade)
+
+  @@id([cardId, keywordId])
+  @@index([cardId])
+  @@index([keywordId])
+}
+
+model PatchChange {
+  id          String   @id @default(uuid())
+  cardId      String
+  patchVersion String
+  fieldChanged String
+  oldValue    String?  @db.Text
+  newValue    String?  @db.Text
+  changeDate  DateTime @default(now())
+
+  @@index([cardId])
+  @@index([patchVersion])
+  @@index([changeDate])
+}
