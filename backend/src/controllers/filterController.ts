@@ -81,7 +81,7 @@ export const getExpansions = async (req: Request, res: Response): Promise<void> 
   try {
     const expansions = await getCachedOrFetch('filters:expansions', async () => {
       return prisma.expansion.findMany({
-        orderBy: { releaseDate: 'desc' },
+        orderBy: { name: 'asc' },
       });
     });
     res.json(expansions);
